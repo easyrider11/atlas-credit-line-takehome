@@ -4,7 +4,9 @@
 - **App:** React Native, in [`react_native_app/`](react_native_app/). The Flutter app is untouched.
 - **Screens:** [`docs/screens/`](docs/screens/), one per state at phone width
 - **Analysis scripts:** [`analysis/`](analysis/) (Python stdlib only)
-- **AI transcripts:** [`transcripts/`](transcripts/)
+- **AI transcript:** [`transcripts/conversation.md`](transcripts/conversation.md), this Claude Code session:
+  every message, tool call and result. Personal items unrelated to the take-home (other files in
+  Downloads, other sessions and projects) are marked `[redacted: ...]`.
 
 ## Run it
 
