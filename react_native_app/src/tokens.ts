@@ -1,15 +1,16 @@
 import type { TextStyle } from 'react-native';
 
+// Colours follow atlasfin.com: primary #226CFF, text #111111, muted #6F6A80.
 export const color = {
-  ink: '#14181B',
-  ink2: '#5A6467',
-  ink3: '#8A9497',
-  paper: '#F6F7F6',
+  ink: '#111111',
+  ink2: '#6F6A80',
+  ink3: '#9C98AA',
+  paper: '#F4F8FF',
   surface: '#FFFFFF',
-  rule: '#E1E6E1',
-  accent: '#0B5049',
+  rule: '#E6E9F4',
+  accent: '#226CFF',
   accentInk: '#FFFFFF',
-  accentSoft: '#E0ECE9',
+  accentSoft: '#E9F0FF',
   positive: '#2C6136',
   warning: '#8A5B06',
   critical: '#8A2E2E',

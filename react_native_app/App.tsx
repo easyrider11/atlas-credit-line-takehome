@@ -404,7 +404,7 @@ function HomePage({
         )}
 
         <View style={styles.largeGap} />
-        <View style={styles.demoDivider} />
+        <View style={styles.demoPanel}>
         <Text style={type.small}>Demo controls · not part of the member's app</Text>
         <DemoPicker
           label="PERSONA"
@@ -432,6 +432,7 @@ function HomePage({
             />
           )
         ) : null}
+        </View>
       </View>
     </ScrollView>
   );
@@ -462,7 +463,10 @@ function PastRequestCard({ line, request }: { line: CreditLine; request: Increas
   if (request.status === 'APPROVED') {
     return (
       <View style={styles.card}>
-        <Text style={styles.label}>LIMIT INCREASE</Text>
+        <View style={styles.cardHeader}>
+          <Text style={styles.label}>LIMIT INCREASE</Text>
+          <StatusPill label="Approved" tone="accent" />
+        </View>
         <View style={styles.smallGap} />
         <Text style={type.body}>
           {'You added ' + moneyWhole(request.approvedCents) + ' to your limit' +
@@ -473,7 +477,10 @@ function PastRequestCard({ line, request }: { line: CreditLine; request: Increas
   }
   return (
     <View style={styles.card}>
-      <Text style={styles.label}>LIMIT INCREASE REQUEST</Text>
+      <View style={styles.cardHeader}>
+        <Text style={styles.label}>LIMIT INCREASE REQUEST</Text>
+        <StatusPill label="Not approved" tone="neutral" />
+      </View>
       <View style={styles.smallGap} />
       <Text style={type.body}>
         {'Your request' + (when ? ' on ' + when : '') + " wasn't approved. Your limit stays at " +
@@ -586,9 +593,11 @@ function RequestPage({
 
         <View style={styles.flex} />
         <View style={styles.largeGap} />
-        <Note text="It won't affect your credit score. We use a soft inquiry." />
-        <Note text="You can only ask once, so pick the amount you'll want." />
-        <View style={styles.smallGap} />
+        <View style={styles.notePanel}>
+          <Note text="It won't affect your credit score. We use a soft inquiry." />
+          <Note text="You can only ask once, so pick the amount you'll want." />
+        </View>
+        <View style={styles.mediumGap} />
         <PrimaryButton
           busy={submitting}
           disabled={submitting}
@@ -619,6 +628,7 @@ function ResultPage({
   if (outcome.kind === 'invalid') {
     return (
       <ResultFrame
+        badge={{ glyph: '!', tone: 'neutral' }}
         headline="That amount isn't available"
         detail={outcome.message}
         primary={{ label: 'Choose another amount', onPress: onRetry }}
@@ -631,6 +641,7 @@ function ResultPage({
   if (request.status === 'APPROVED') {
     return (
       <ResultFrame
+        badge={{ glyph: '✓', tone: 'accent' }}
         headline="Approved"
         detail={'You added ' + moneyWhole(request.approvedCents) + ". It's ready to use now."}
         primary={{ label: 'Back to Home', onPress: onDone }}
@@ -651,6 +662,7 @@ function ResultPage({
 
   return (
     <ResultFrame
+      badge={{ glyph: 'i', tone: 'neutral' }}
       headline="We can't raise your limit right now"
       detail={'Your limit stays at ' + money(line.limitCents) + '.'}
       primary={{ label: 'Back to Home', onPress: onDone }}
@@ -687,6 +699,7 @@ function UncertainResult({
 
   return (
     <ResultFrame
+      badge={{ glyph: '?', tone: 'neutral' }}
       headline="We couldn't confirm your request"
       detail={unreachable
         ? "We still can't reach your account. Your request may have gone through, so we won't send another until we can check."
@@ -703,12 +716,14 @@ function UncertainResult({
 }
 
 function ResultFrame({
+  badge,
   headline,
   detail,
   primary,
   secondary,
   children,
 }: {
+  badge: { glyph: string; tone: 'accent' | 'neutral' };
   headline: string;
   detail: string;
   primary: { label: string; onPress: () => void; disabled?: boolean; busy?: boolean };
@@ -719,6 +734,18 @@ function ResultFrame({
     <ScrollView contentContainerStyle={styles.scroll}>
       <View style={styles.page}>
         <View style={styles.resultTopGap} />
+        <View
+          aria-hidden
+          importantForAccessibility="no-hide-descendants"
+          style={[styles.badge, badge.tone === 'accent' ? styles.badgeAccent : styles.badgeNeutral]}
+        >
+          <Text
+            style={[styles.badgeGlyph, { color: badge.tone === 'accent' ? color.accent : color.ink2 }]}
+          >
+            {badge.glyph}
+          </Text>
+        </View>
+        <View style={styles.mediumGap} />
         <Text accessibilityRole="header" style={type.title}>{headline}</Text>
         <View style={styles.smallGap} />
         <Text style={type.bodyMuted}>{detail}</Text>
@@ -766,6 +793,16 @@ function DeclineReasons({
           </View>
         ))
       )}
+    </View>
+  );
+}
+
+function StatusPill({ label, tone }: { label: string; tone: 'accent' | 'neutral' }) {
+  return (
+    <View style={[styles.pill, tone === 'accent' ? styles.pillAccent : styles.pillNeutral]}>
+      <Text style={[styles.pillText, { color: tone === 'accent' ? color.accentInk : color.ink2 }]}>
+        {label}
+      </Text>
     </View>
   );
 }
@@ -883,7 +920,7 @@ function StepButton({
         pressed && !disabled && styles.pressed,
       ]}
     >
-      <Text style={type.heading}>{label}</Text>
+      <Text style={[type.heading, styles.stepGlyph]}>{label}</Text>
     </Pressable>
   );
 }
@@ -953,14 +990,48 @@ const styles = StyleSheet.create({
   },
   centerText: { textAlign: 'center' },
   numeric: { fontVariant: ['tabular-nums'] },
-  // Token label style in ink2: ink3 measures 2.9-3.1:1 on paper and surface,
-  // under the 4.5:1 small text needs.
+  // Token label style in ink2: ink3 is under the 4.5:1 small text needs on
+  // paper and surface.
   label: { ...type.label, color: color.ink2 },
-  demoDivider: {
-    backgroundColor: color.rule,
-    height: 1,
-    marginBottom: space.s3,
+  demoPanel: {
+    borderColor: color.rule,
+    borderRadius: radius,
+    borderStyle: 'dashed',
+    borderWidth: 1,
+    paddingHorizontal: space.s4,
+    paddingTop: space.s3,
   },
+  cardHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  pill: {
+    borderRadius: 999,
+    paddingHorizontal: space.s2,
+    paddingVertical: 2,
+  },
+  pillAccent: { backgroundColor: color.accent },
+  pillNeutral: { backgroundColor: color.paper, borderColor: color.rule, borderWidth: 1 },
+  pillText: { ...type.small, fontWeight: '600' },
+  notePanel: {
+    backgroundColor: color.accentSoft,
+    borderRadius: radius,
+    paddingHorizontal: space.s4,
+    paddingTop: space.s3,
+    paddingBottom: space.s2,
+  },
+  badge: {
+    alignItems: 'center',
+    borderRadius: 24,
+    height: 48,
+    justifyContent: 'center',
+    width: 48,
+  },
+  badgeAccent: { backgroundColor: color.accentSoft },
+  badgeNeutral: { backgroundColor: color.surface, borderColor: color.rule, borderWidth: 1 },
+  badgeGlyph: { fontSize: 22, fontWeight: '600', lineHeight: 26 },
+  stepGlyph: { color: color.accent },
   topGap: { height: space.s5 },
   resultTopGap: { height: space.s7 },
   largeGap: { height: space.s5 },
@@ -1079,7 +1150,7 @@ const styles = StyleSheet.create({
   },
   modalBackdrop: {
     alignItems: 'center',
-    backgroundColor: 'rgba(20, 24, 27, 0.35)',
+    backgroundColor: 'rgba(17, 17, 17, 0.35)',
     flex: 1,
     justifyContent: 'center',
     padding: space.s5,

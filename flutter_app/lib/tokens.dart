@@ -9,16 +9,16 @@ class T {
   T._();
 
   // ---- colour ----
-  static const ink = Color(0xFF14181B); // primary text
-  static const ink2 = Color(0xFF5A6467); // secondary text
-  static const ink3 = Color(0xFF8A9497); // tertiary / hint
-  static const paper = Color(0xFFF6F7F6); // screen background
+  static const ink = Color(0xFF111111); // primary text
+  static const ink2 = Color(0xFF6F6A80); // secondary text
+  static const ink3 = Color(0xFF9C98AA); // tertiary / hint
+  static const paper = Color(0xFFF4F8FF); // screen background
   static const surface = Color(0xFFFFFFFF); // cards
-  static const rule = Color(0xFFE1E6E1); // borders, dividers
+  static const rule = Color(0xFFE6E9F4); // borders, dividers
 
-  static const accent = Color(0xFF0B5049); // primary action
+  static const accent = Color(0xFF226CFF); // primary action
   static const accentInk = Color(0xFFFFFFFF); // text on accent
-  static const accentSoft = Color(0xFFE0ECE9);
+  static const accentSoft = Color(0xFFE9F0FF);
 
   static const positive = Color(0xFF2C6136);
   static const warning = Color(0xFF8A5B06);
