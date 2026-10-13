@@ -1,3 +1,79 @@
+# Credit line increase take-home: submission
+
+- **Decision and next experiment:** [`DECISIONS.pdf`](DECISIONS.pdf) (source: [`docs/DECISIONS.html`](docs/DECISIONS.html))
+- **App:** React Native, in [`react_native_app/`](react_native_app/). The Flutter app is untouched.
+- **Screens:** [`docs/screens/`](docs/screens/), one per state at phone width
+- **Analysis scripts:** [`analysis/`](analysis/) (Python stdlib only)
+- **AI transcripts:** [`transcripts/`](transcripts/)
+
+## Run it
+
+Needs Node 18+. Two terminals:
+
+```bash
+cd mock-api && npm start
+```
+
+```bash
+cd react_native_app && npm install && npm run web
+```
+
+Open http://localhost:8081. At the bottom of Home there are two separate demo switches:
+**PERSONA** (which member you are, from the mock API) and **ARM** (the experiment group).
+On web you can also link straight to a combination:
+
+| What you see | Link |
+|---|---|
+| No-room member, arm A (hidden) | http://localhost:8081/?persona=insufficient-history&arm=hidden |
+| No-room member, arm B (limit status card) | http://localhost:8081/?persona=insufficient-history&arm=status |
+| Member with $800 of room (same in both arms) | http://localhost:8081/?persona=utilization-too-high&arm=status |
+| Member with $2,500 of room (same in both arms) | http://localhost:8081/?persona=approved&arm=hidden |
+
+The mock API keeps state in memory and allows one request per persona. Restart it to reset.
+
+## Experiment groups
+
+The arms differ only for members with no room under their ceiling (23% of signups).
+Everyone with room gets the increase flow, with the slider capped at their room.
+
+| Arm | Member with room | Member with no room |
+|---|---|---|
+| A · hidden | Increase flow | No entry point (what control saw) |
+| B · status | Increase flow | No entry point, plus a card on Home with the reasons for their limit |
+
+## Check it
+
+```bash
+cd react_native_app && npm run typecheck
+```
+
+```bash
+cd mock-api && ./smoke.sh
+```
+
+`smoke.sh` needs a freshly started mock API. Journeys checked by hand in the running web app at
+375×812: approval goes live and Home reloads; the slider stops at the member's room; a duplicate
+submit (409) shows the decision already made, with reasons; the API down shows a retry that then
+succeeds; a no-room member sees nothing in arm A and the status card in arm B.
+
+Analysis (each script takes the data folder and runs in under a minute):
+
+```bash
+python3 analysis/retention.py data
+```
+
+`explore.py` checks data integrity; `retention.py`, `dose.py`, `deeper.py`, `nonrequesters.py` and
+`verify.py` produce the cuts quoted in `DECISIONS.pdf`.
+
+## Changes outside the app
+
+- `mock-api/server.js`: `GET /v1/credit-line` also returns `increase_eligibility`
+  (`{ eligible, reason_codes }`), set at signup like the ceiling. Arm B needs it to show the reasons
+  without making the member submit a request that can only be declined. Approval rules are unchanged;
+  `smoke.sh` passes 26/26. Documented in `mock-api/README.md`.
+
+---
+
 # Credit line increase take-home
 
 - **Timebox:** Two hours

@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Credit line increase: decisions</title>
+<style>
+  @page { size: Letter; margin: 0.45in 0.5in; }
+  :root { --ink:#14181B; --ink2:#5A6467; --rule:#E1E6E1; --accent:#0B5049; --soft:#E0ECE9; --crit:#8A2E2E; --critSoft:#F7E7E5; }
+  * { box-sizing: border-box; }
+  body { font: 9.1pt/1.36 -apple-system, "Helvetica Neue", Arial, sans-serif; color: var(--ink); margin: 0; background: #fff; }
+  h1 { font-size: 15pt; margin: 0 0 2px; letter-spacing: -0.2px; }
+  .sub { color: var(--ink2); margin: 0 0 8px; }
+  h2 { font-size: 7.6pt; text-transform: uppercase; letter-spacing: 0.8px; color: var(--accent); margin: 9px 0 3px; }
+  p { margin: 0 0 4px; }
+  ul { margin: 0 0 4px; padding-left: 14px; }
+  li { margin: 0 0 2px; }
+  .decision { background: var(--soft); border-radius: 8px; padding: 7px 10px; margin-bottom: 6px; }
+  .decision b { color: var(--accent); }
+  table { border-collapse: collapse; width: 100%; margin: 2px 0 4px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 2px 6px; border-bottom: 1px solid var(--rule); }
+  th { font-size: 7.4pt; color: var(--ink2); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+  th.n { text-align: right; }
+  td.n { text-align: right; }
+  .neg { color: var(--crit); font-weight: 600; }
+  .pos { color: var(--accent); font-weight: 600; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; }
+  .muted { color: var(--ink2); }
+  .small { font-size: 8pt; }
+</style>
+</head>
+<body>
+<h1>Credit line increase: what to ship and what to test next</h1>
+<p class="sub">Data: 1,000,000 members (500,226 control / 499,774 treatment), joined Jun 1 – Aug 9, snapshot Aug 25. Retention = account still open N days after joining, among members with at least N days of tenure.</p>
+
+<div class="decision"><b>Decision: ship to members with room, switch it off for members with none.</b>
+Not a plain ship. The average result is flat because it adds a large gain and a large loss. Members whose ceiling is above their limit get the flow, with the slider capped at their room. Members with no room see no entry point. Projected 30-day retention: <b>~92.4% vs 87.8%</b> in control (+4.6 pts). Keep a 5% no-feature holdback to keep reading the long-run effect.</div>
+
+<h2>Evidence</h2>
+<table>
+  <tr><th>30-day retention</th><th>Share</th><th class="n">Treatment</th><th class="n">Control</th><th class="n">Difference</th></tr>
+  <tr><td>Everyone</td><td>100%</td><td class="n">87.8%</td><td class="n">87.8%</td><td class="n">0.0 pts</td></tr>
+  <tr><td>Room under ceiling (room &gt; 0)</td><td>77%</td><td class="n">93.8%</td><td class="n">87.8%</td><td class="n pos">+6.0 ± 0.2</td></tr>
+  <tr><td>No room (room = 0)</td><td>23%</td><td class="n">68.0%</td><td class="n">87.9%</td><td class="n neg">−19.9 ± 0.4</td></tr>
+</table>
+<div class="cols">
+<ul>
+  <li><b>Every request from a no-room member was declined: 110,199 of 110,199.</b> The app let them ask for something that could not be approved, and ran a soft inquiry to tell them so.</li>
+  <li><b>The decline does the damage, not the reason or the ask.</b> Declined members keep ~68% whatever the reason code (67.8–68.6%) and whatever they asked for (67.6–68.3%). No-room treatment members close at 3.5%/day in their first week vs 0.43%/day in control.</li>
+  <li><b>The money doesn't drive the gain.</b> Approved members retain 93.6–94.2% at every ask size and every share of room taken. Members with room who never asked retain 93.5%.</li>
+</ul>
+<ul>
+  <li><b>The gain arrives late and for everyone in treatment.</b> Among members still open at day 15, 0.2–0.3% close by day 30 in every treatment subgroup (approved, never asked, even declined) vs 6.55% in control. The room &gt; 0 gain grows to +7.5 pts at 60 days.</li>
+  <li><b>It's stable:</b> same sign and size in all 8 readable join weeks and all four starting limits; room and limit mix are balanced across groups. The 14-day ITT reads −6.0 pts only because the decline burst comes first.</li>
+  <li class="muted small">Data notes: 18,438 approved asks are for $50, below the $100 API minimum (same retention). Approved members show a closure spike the day after asking, but it's timing, not harm: 5.98% closed by day 14 vs 6.00% in control.</li>
+</ul>
+</div>
+
+<h2>Next experiment: what no-room members see (23% of signups)</h2>
+<div class="cols">
+<div>
+<p><b>A · Hidden.</b> No entry point, the same Home the control group saw. Expected ~87.9%.</p>
+<p><b>B · Limit status card.</b> No ask and no soft inquiry. A card on Home says their limit is the most we can offer right now, lists the specific reasons in plain language, and gives general credit habits. It makes no promise of a future increase; the ceiling is fixed.</p>
+<p><b>Why this one.</b> Treatment members who never asked, and even declined members who stayed past day 14, almost stopped closing. Something about the experience helps beyond the money. B tests whether no-room members can get that without the decline. If B reaches the room &gt; 0 level, that's +5.9 pts on 23% of members ≈ <b>+1.4 pts overall</b>, the largest lever left.</p>
+</div>
+<div>
+<p><b>Primary metric:</b> 30-day retention. <b>Guardrail:</b> 7-day closure rate, checked daily. Stop B if it runs 1 pt above A, since B could feel like a decline without the ask.</p>
+<p><b>Size:</b> a 1-pt effect at an 88% baseline needs ~16,600 members per arm (α 0.05, power 0.8). That's ~23,000 no-room signups a week, so ~1.5 weeks to enrol, then 30 days to read.</p>
+<p><b>Deprioritised:</b> showing members with room their headroom up front (never-askers already retain 93.5%, so there's little to gain); amount defaults (size has no effect); a softer decline screen for no-room members (it still makes them ask for something that can't succeed).</p>
+<p class="muted small"><b>Open questions:</b> never-askers are a self-selected 5%. Why closures nearly stop after day 14 isn't explained by these two tables. B needs the API to expose the reason codes it would return (added to the mock as <code>increase_eligibility</code>).</p>
+</div>
+</div>
+
+<h2>What changes in the app (both arms)</h2>
+<div class="cols">
+<ul>
+  <li><b>No doomed asks.</b> The entry point shows only when at least $100 fits under the ceiling, and the slider stops at the member's room.</li>
+  <li><b>Declines name the reasons.</b> The baseline said only "Declined". Now each <code>reason_code</code> is shown in plain words, on the result screen and on Home afterwards.</li>
+  <li><b>The soft inquiry is explained</b> before submitting and after a decline: it does not affect the credit score.</li>
+</ul>
+<ul>
+  <li><b>One request, said up front.</b> "You can only ask once." After that, Home shows the decision instead of a button that just disappears.</li>
+  <li><b>Approval is live at once.</b> The result shows the new available-to-spend; Home reloads the account.</li>
+  <li><b>Failures are safe.</b> A lost response offers a retry; a duplicate submit (409) shows the decision already made.</li>
+</ul>
+</div>
+</body>
+</html>

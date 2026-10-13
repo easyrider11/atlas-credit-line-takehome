@@ -44,6 +44,12 @@ book, `utilization-too-high` 22, `insufficient-history` 5, `new-credit-lines` 2.
 | `POST` | `/v1/credit-line/increase-requests` | Submit. Body: `{ "requested_amount_cents": 25000 }` — the **increase**, not the target limit |
 | `GET` | `/health` | Liveness and the persona list |
 
+**Added for the next experiment:** `/v1/credit-line` also returns `increase_eligibility`:
+`{ "eligible": false, "reason_codes": ["INSUFFICIENT_PAYMENT_HISTORY"] }` for a member with no room at
+signup (`insufficient-history`), `{ "eligible": true, "reason_codes": [] }` otherwise. Like the ceiling, it
+is set at signup and never changes. It lets the app tell a member why without making them submit a
+request that can only be declined.
+
 **A member can request once.** After that, `increase_request` on `/v1/credit-line`
 carries the decision, and further submits return `409 ALREADY_REQUESTED`. The app
 should not offer the request button to a member who has already requested.

@@ -64,6 +64,9 @@ const MIN_CENTS = 10000, MAX_CENTS = 250000, STEP_CENTS = 5000;
 
 const requestsByPersona = new Map(); // persona -> request record
 
+// Even the smallest valid ask would overshoot the ceiling.
+const noRoomAtSignup = (p) => p.max_eligible_limit_cents - p.limit_cents < MIN_CENTS;
+
 const json = (res, code, body) => {
   const payload = JSON.stringify(body, null, 2);
   res.writeHead(code, {
@@ -117,6 +120,12 @@ const server = createServer(async (req, res) => {
         dob: "1994-03-02",
       },
       increase_request: requestsByPersona.get(key) || null,
+      // Added for the next experiment: a member with no room at signup can be
+      // told why without being made to submit a request that can only fail.
+      // Decided once at signup, like the ceiling, so it never changes.
+      increase_eligibility: noRoomAtSignup(p)
+        ? { eligible: false, reason_codes: [p.decline_reason] }
+        : { eligible: true, reason_codes: [] },
     });
   }
 

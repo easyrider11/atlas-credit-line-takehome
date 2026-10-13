@@ -6,6 +6,7 @@ import {
   Modal,
   Pressable,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -14,10 +15,78 @@ import {
 import { ApiClient, ApiResult, JsonObject, Persona, personas } from './src/apiClient';
 import { color, radius, space, type } from './src/tokens';
 
+// Arms of the next experiment (see DECISIONS.pdf). Members with room get the
+// shipped increase flow in both arms. The arms differ only for members with no
+// room under their ceiling, who can never be approved:
+//   hidden - no entry point at all, the same Home the control group saw
+//   status - no entry point, plus a card that says why the limit is where it is
+const arms = ['hidden', 'status'] as const;
+type Arm = (typeof arms)[number];
+const armLabel: Record<Arm, string> = {
+  hidden: 'A · No room: hidden',
+  status: 'B · No room: limit status',
+};
+
+// Bounds of POST /v1/credit-line/increase-requests.
+const MIN_ASK_CENTS = 10000;
+const MAX_ASK_CENTS = 250000;
+const STEP_CENTS = 5000;
+// Same starting point in both arms so the amount isn't a second variable.
+const DEFAULT_ASK_CENTS = 50000;
+
+// Compliance: a declined member must be told the specific reasons.
+const reasonCopy: Record<string, string> = {
+  UTILIZATION_TOO_HIGH:
+    'Your credit file shows high utilization on this card and / or other cards as of late.',
+  INSUFFICIENT_PAYMENT_HISTORY: 'We need to see a longer run of on-time payments first.',
+  NEW_CREDIT_LINES: "We've noticed a number of new credit lines you've opened recently.",
+};
+
+// The same reasons for a member who never asked. Stated as facts: the decline
+// wording ("...first") reads as a path to an increase, and the ceiling is fixed.
+const statusReasonCopy: Record<string, string> = {
+  UTILIZATION_TOO_HIGH:
+    'Your credit file shows high utilization on this card and / or other cards as of late.',
+  INSUFFICIENT_PAYMENT_HISTORY: 'Your record of on-time payments with us is still short.',
+  NEW_CREDIT_LINES: 'Your credit file shows a number of new credit lines opened recently.',
+};
+
+// General credit habits, not a promise: the ceiling is fixed, so nothing here
+// may suggest that doing these will raise this limit.
+const habitCopy: Record<string, string> = {
+  UTILIZATION_TOO_HIGH: 'Keeping balances well below your limits, on this card and others.',
+  INSUFFICIENT_PAYMENT_HISTORY: 'Paying at least the minimum on time, every month.',
+  NEW_CREDIT_LINES: 'Holding off on opening new credit lines for a while.',
+};
+
+type IncreaseRequest = {
+  status: string;
+  requestedCents: number;
+  approvedCents: number;
+  newLimitCents: number;
+  reasonCodes: string[];
+  createdAt: string | null;
+};
+
+type CreditLine = {
+  limitCents: number;
+  maxEligibleCents: number;
+  balanceCents: number;
+  holdsCents: number;
+  increaseRequest: IncreaseRequest | null;
+  // Why a member with no room has none. Set at signup, like the ceiling.
+  noRoomReasons: string[];
+};
+
+type Outcome =
+  | { kind: 'decided'; request: IncreaseRequest }
+  | { kind: 'invalid'; message: string }
+  | { kind: 'failed' };
+
 type Screen =
   | { name: 'home'; refreshKey: number }
-  | { name: 'request'; limitCents: number }
-  | { name: 'result'; result: ApiResult | null; error: string | null };
+  | { name: 'request'; line: CreditLine }
+  | { name: 'result'; line: CreditLine; outcome: Outcome };
 
 const currency = new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -38,13 +107,113 @@ function moneyWhole(cents: number) {
   return wholeCurrency.format(cents / 100);
 }
 
+function shortDate(iso: string | null) {
+  if (!iso) return null;
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime())
+    ? null
+    : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
 function numberField(object: JsonObject | null, key: string) {
   const value = object?.[key];
   return typeof value === 'number' ? value : 0;
 }
 
+function parseIncreaseRequest(value: unknown): IncreaseRequest | null {
+  if (value === null || typeof value !== 'object') return null;
+  const object = value as JsonObject;
+  if (typeof object.status !== 'string') return null;
+  return {
+    status: object.status,
+    requestedCents: numberField(object, 'requested_amount_cents'),
+    approvedCents: numberField(object, 'approved_amount_cents'),
+    newLimitCents: numberField(object, 'new_limit_cents'),
+    reasonCodes: stringList(object.reason_codes),
+    createdAt: typeof object.created_at === 'string' ? object.created_at : null,
+  };
+}
+
+function stringList(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
+}
+
+function parseCreditLine(body: JsonObject): CreditLine {
+  const eligibility = body.increase_eligibility;
+  return {
+    limitCents: numberField(body, 'limit_cents'),
+    maxEligibleCents: numberField(body, 'max_eligible_limit_cents'),
+    balanceCents: numberField(body, 'balance_cents'),
+    holdsCents: numberField(body, 'pending_holds_cents'),
+    increaseRequest: parseIncreaseRequest(body.increase_request),
+    noRoomReasons: eligibility !== null && typeof eligibility === 'object'
+      ? stringList((eligibility as JsonObject).reason_codes)
+      : [],
+  };
+}
+
+function availableCents(line: CreditLine, limitCents = line.limitCents) {
+  return Math.max(0, limitCents - line.balanceCents - line.holdsCents);
+}
+
+// The most this member can add and still land at or under their ceiling,
+// clamped to what the endpoint accepts.
+function maxAskCents(line: CreditLine) {
+  const room = line.maxEligibleCents - line.limitCents;
+  return Math.min(MAX_ASK_CENTS, Math.floor(room / STEP_CENTS) * STEP_CENTS);
+}
+
+// Never put a member in front of an ask that is doomed: no entry point unless
+// even the smallest amount fits under their ceiling.
+function canIncrease(line: CreditLine) {
+  return line.increaseRequest === null && maxAskCents(line) >= MIN_ASK_CENTS;
+}
+
+// Has never asked and never could: the only members the two arms treat differently.
+function hasNoRoom(line: CreditLine) {
+  return line.increaseRequest === null && maxAskCents(line) < MIN_ASK_CENTS;
+}
+
+// Web demo only: ?persona=insufficient-history&arm=status opens straight into a
+// combination, so reviewers can link to each experiment group.
+function demoParam<T extends string>(name: string, options: readonly T[]): T | null {
+  const search = typeof window !== 'undefined' ? window.location?.search : undefined;
+  if (!search) return null;
+  const value = new URLSearchParams(search).get(name);
+  return options.find((option) => option === value) ?? null;
+}
+
+function toOutcome(result: ApiResult | null): Outcome {
+  if (!result || result.statusCode >= 500) return { kind: 'failed' };
+  if (result.isSuccess) {
+    const request = parseIncreaseRequest(result.body);
+    if (request) return { kind: 'decided', request };
+  }
+  // A retry after a lost response lands here; show the decision that was made.
+  if (result.errorCode === 'ALREADY_REQUESTED') {
+    const prior = parseIncreaseRequest(result.body.increase_request);
+    if (prior) return { kind: 'decided', request: prior };
+  }
+  if (result.statusCode === 400 || result.statusCode === 422) {
+    return {
+      kind: 'invalid',
+      message: typeof result.body.message === 'string'
+        ? result.body.message
+        : 'Please choose a different amount.',
+    };
+  }
+  return { kind: 'failed' };
+}
+
 export default function App() {
-  const api = useMemo(() => new ApiClient(), []);
+  const api = useMemo(() => {
+    const client = new ApiClient();
+    client.persona = demoParam('persona', personas) ?? client.persona;
+    return client;
+  }, []);
+  const [arm, setArm] = useState<Arm>(() => demoParam('arm', arms) ?? 'hidden');
   const [screen, setScreen] = useState<Screen>({ name: 'home', refreshKey: 0 });
 
   const goHome = () => {
@@ -60,18 +229,25 @@ export default function App() {
       {screen.name === 'home' ? (
         <HomePage
           api={api}
+          arm={arm}
+          onArmChange={setArm}
           refreshKey={screen.refreshKey}
-          onRequest={(limitCents) => setScreen({ name: 'request', limitCents })}
+          onIncrease={(line) => setScreen({ name: 'request', line })}
         />
       ) : screen.name === 'request' ? (
         <RequestPage
           api={api}
-          limitCents={screen.limitCents}
+          line={screen.line}
           onBack={goHome}
-          onResult={(result, error) => setScreen({ name: 'result', result, error })}
+          onOutcome={(outcome) => setScreen({ name: 'result', line: screen.line, outcome })}
         />
       ) : (
-        <ResultPage result={screen.result} error={screen.error} onDone={goHome} />
+        <ResultPage
+          line={screen.line}
+          outcome={screen.outcome}
+          onRetry={() => setScreen({ name: 'request', line: screen.line })}
+          onDone={goHome}
+        />
       )}
     </SafeAreaView>
   );
@@ -79,19 +255,22 @@ export default function App() {
 
 function HomePage({
   api,
+  arm,
+  onArmChange,
   refreshKey,
-  onRequest,
+  onIncrease,
 }: {
   api: ApiClient;
+  arm: Arm;
+  onArmChange: (arm: Arm) => void;
   refreshKey: number;
-  onRequest: (limitCents: number) => void;
+  onIncrease: (line: CreditLine) => void;
 }) {
-  const [account, setAccount] = useState<JsonObject | null>(null);
+  const [line, setLine] = useState<CreditLine | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
   const [persona, setPersona] = useState<Persona>(api.persona);
-  const [personaOpen, setPersonaOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -101,7 +280,7 @@ function HomePage({
     api.getCreditLine().then((response) => {
       if (!active) return;
       if (response.isSuccess) {
-        setAccount(response.body);
+        setLine(parseCreditLine(response.body));
       } else {
         setError('The API answered HTTP ' + response.statusCode + '.');
       }
@@ -120,185 +299,384 @@ function HomePage({
   const choosePersona = (next: Persona) => {
     api.persona = next;
     setPersona(next);
-    setPersonaOpen(false);
   };
 
-  const limit = numberField(account, 'limit_cents');
-  const spent = numberField(account, 'balance_cents');
-  const alreadyRequested = account?.increase_request != null;
-
   return (
-    <View style={styles.page}>
-      <Text style={type.title}>Your credit line</Text>
-      <View style={styles.topGap} />
+    <ScrollView contentContainerStyle={styles.scroll}>
+      <View style={styles.page}>
+        <Text style={type.title}>Your credit line</Text>
+        <View style={styles.topGap} />
 
-      {loading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator color={color.accent} />
-        </View>
-      ) : error ? (
-        <View style={styles.centered}>
-          <Text style={[type.bodyMuted, styles.centerText]}>{error}</Text>
-          <View style={styles.mediumGap} />
-          <SecondaryButton label="Retry" onPress={() => setReloadKey((value) => value + 1)} />
-        </View>
-      ) : (
-        <View style={styles.flex}>
-          {!alreadyRequested ? (
-            <PrimaryButton label="Increase" onPress={() => onRequest(limit)} />
-          ) : null}
-          <View style={styles.mediumGap} />
-          <View style={styles.card}>
-            <AccountRow label="Credit limit" value={money(limit)} />
-            <View style={styles.divider} />
-            <AccountRow label="Spent" value={money(spent)} />
+        {loading ? (
+          <View style={styles.centered}>
+            <ActivityIndicator color={color.accent} />
           </View>
-        </View>
-      )}
+        ) : error || !line ? (
+          <View style={styles.centered}>
+            <Text style={[type.bodyMuted, styles.centerText]}>{error}</Text>
+            <View style={styles.mediumGap} />
+            <SecondaryButton label="Retry" onPress={() => setReloadKey((value) => value + 1)} />
+          </View>
+        ) : (
+          <View style={styles.flex}>
+            <View style={styles.card}>
+              <Text style={type.label}>AVAILABLE TO SPEND</Text>
+              <View style={styles.tinyGap} />
+              <Text style={[type.display, styles.numeric]}>{money(availableCents(line))}</Text>
+              <View style={styles.divider} />
+              <AccountRow label="Credit limit" value={money(line.limitCents)} />
+              <View style={styles.smallGap} />
+              <AccountRow label="Balance" value={money(line.balanceCents)} />
+              {line.holdsCents > 0 ? (
+                <>
+                  <View style={styles.smallGap} />
+                  <AccountRow label="Pending" value={money(line.holdsCents)} />
+                </>
+              ) : null}
+            </View>
 
-      <View style={styles.personaRow}>
-        <Text style={type.label}>PERSONA</Text>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={'Current persona: ' + persona}
-          onPress={() => setPersonaOpen(true)}
-          style={styles.personaButton}
-        >
-          <Text numberOfLines={1} style={type.small}>{persona}</Text>
-          <View style={styles.chevron} />
-        </Pressable>
+            {line.increaseRequest ? (
+              <>
+                <View style={styles.mediumGap} />
+                <PastRequestCard line={line} request={line.increaseRequest} />
+              </>
+            ) : null}
+
+            {arm === 'status' && hasNoRoom(line) ? (
+              <>
+                <View style={styles.mediumGap} />
+                <LimitStatusCard line={line} />
+              </>
+            ) : null}
+
+            {canIncrease(line) ? (
+              <>
+                <View style={styles.largeGap} />
+                <PrimaryButton label="Request an increase" onPress={() => onIncrease(line)} />
+              </>
+            ) : null}
+          </View>
+        )}
+
+        <View style={styles.largeGap} />
+        <DemoPicker
+          label="PERSONA"
+          value={persona}
+          options={personas}
+          describe={(option) => option}
+          onChange={choosePersona}
+        />
+        <DemoPicker
+          label="ARM"
+          value={arm}
+          options={arms}
+          describe={(option) => armLabel[option]}
+          onChange={onArmChange}
+        />
       </View>
+    </ScrollView>
+  );
+}
 
-      <Modal
-        animationType="fade"
-        transparent
-        visible={personaOpen}
-        onRequestClose={() => setPersonaOpen(false)}
-      >
-        <Pressable style={styles.modalBackdrop} onPress={() => setPersonaOpen(false)}>
-          <View style={styles.personaMenu}>
-            <Text style={type.heading}>Choose a persona</Text>
-            <View style={styles.smallGap} />
-            {personas.map((option) => (
-              <Pressable
-                accessibilityRole="button"
-                key={option}
-                onPress={() => choosePersona(option)}
-                style={({ pressed }) => [
-                  styles.personaOption,
-                  option === persona && styles.personaOptionSelected,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Text style={option === persona ? type.body : type.bodyMuted}>{option}</Text>
-              </Pressable>
-            ))}
-          </View>
-        </Pressable>
-      </Modal>
+// Arm B, members with no room only. Answers the question a decline would have
+// answered (why), without a request that can only fail and its soft inquiry.
+function LimitStatusCard({ line }: { line: CreditLine }) {
+  const habits = line.noRoomReasons.filter((code) => habitCopy[code]);
+  return (
+    <View style={styles.card}>
+      <Text style={type.label}>YOUR LIMIT</Text>
+      <View style={styles.smallGap} />
+      <Text style={type.heading}>
+        {moneyWhole(line.limitCents) + ' is the most we can offer you right now'}
+      </Text>
+      <View style={styles.tinyGap} />
+      <Text style={type.small}>
+        So you're not left guessing, here's what it's based on. There's nothing to apply for.
+      </Text>
+      <View style={styles.mediumGap} />
+      <DeclineReasons codes={line.noRoomReasons} copy={statusReasonCopy} />
+      {habits.length > 0 ? (
+        <>
+          <View style={styles.smallGap} />
+          <Text style={type.label}>GOOD FOR YOUR CREDIT IN GENERAL</Text>
+          <View style={styles.tinyGap} />
+          {habits.map((code) => <Note key={code} text={habitCopy[code]} />)}
+        </>
+      ) : null}
+    </View>
+  );
+}
+
+// Shown in both arms once a member has asked: they can only ask once, so the
+// decision (and, for a decline, the reasons) stays visible instead of the
+// button silently disappearing.
+function PastRequestCard({ line, request }: { line: CreditLine; request: IncreaseRequest }) {
+  const when = shortDate(request.createdAt);
+  if (request.status === 'APPROVED') {
+    return (
+      <View style={styles.card}>
+        <Text style={type.label}>LIMIT INCREASE</Text>
+        <View style={styles.smallGap} />
+        <Text style={type.body}>
+          {'You added ' + moneyWhole(request.approvedCents) + ' to your limit' +
+            (when ? ' on ' + when : '') + '.'}
+        </Text>
+      </View>
+    );
+  }
+  return (
+    <View style={styles.card}>
+      <Text style={type.label}>LIMIT INCREASE REQUEST</Text>
+      <View style={styles.smallGap} />
+      <Text style={type.body}>
+        {'Your request' + (when ? ' on ' + when : '') + " wasn't approved. Your limit stays at " +
+          moneyWhole(line.limitCents) + '.'}
+      </Text>
+      <View style={styles.smallGap} />
+      <DeclineReasons codes={request.reasonCodes} />
     </View>
   );
 }
 
 function RequestPage({
   api,
-  limitCents,
+  line,
   onBack,
-  onResult,
+  onOutcome,
 }: {
   api: ApiClient;
-  limitCents: number;
+  line: CreditLine;
   onBack: () => void;
-  onResult: (result: ApiResult | null, error: string | null) => void;
+  onOutcome: (outcome: Outcome) => void;
 }) {
-  const [amountDollars, setAmountDollars] = useState(500);
+  const max = maxAskCents(line);
+  const [amount, setAmount] = useState(Math.min(DEFAULT_ASK_CENTS, max));
   const [submitting, setSubmitting] = useState(false);
-  const increase = Math.round(amountDollars * 100);
+  const newLimit = line.limitCents + amount;
+
+  const nudge = (delta: number) => {
+    setAmount((current) => Math.min(max, Math.max(MIN_ASK_CENTS, current + delta)));
+  };
 
   const submit = async () => {
     setSubmitting(true);
+    let result: ApiResult | null = null;
     try {
-      const result = await api.submitIncreaseRequest(increase);
-      setSubmitting(false);
-      onResult(result, null);
+      result = await api.submitIncreaseRequest(amount);
     } catch {
-      setSubmitting(false);
-      onResult(null, 'Could not reach the mock API.');
+      result = null;
     }
+    setSubmitting(false);
+    onOutcome(toOutcome(result));
   };
 
   return (
-    <View style={styles.page}>
-      <BackButton onPress={onBack} />
-      <Text style={type.title}>Request an increase</Text>
-      <View style={styles.topGap} />
-      <View style={styles.card}>
-        <Text style={[type.label, styles.centerText]}>INCREASE BY</Text>
-        <View style={styles.tinyGap} />
-        <Text style={[type.display, styles.centerText]}>{moneyWhole(increase)}</Text>
-        <Slider
-          accessibilityLabel="Increase amount"
-          maximumTrackTintColor={color.rule}
-          maximumValue={2500}
-          minimumTrackTintColor={color.accent}
-          minimumValue={100}
-          onValueChange={setAmountDollars}
-          step={50}
-          style={styles.slider}
-          thumbTintColor={color.accent}
-          value={amountDollars}
-        />
-        <Text style={[type.small, styles.centerText]}>
-          {'New limit if approved: ' + money(limitCents + increase)}
+    <ScrollView contentContainerStyle={styles.scroll}>
+      <View style={styles.page}>
+        <BackButton onPress={onBack} />
+        <Text style={type.title}>Request an increase</Text>
+        <View style={styles.smallGap} />
+        <Text style={type.bodyMuted}>
+          {'Choose how much to add to your ' + moneyWhole(line.limitCents) + ' limit.'}
         </Text>
+        <View style={styles.topGap} />
+
+        <View style={styles.card}>
+          <Text style={[type.label, styles.centerText]}>INCREASE BY</Text>
+          <View style={styles.tinyGap} />
+          <Text
+            accessibilityLiveRegion="polite"
+            style={[type.display, styles.centerText, styles.numeric]}
+          >
+            {moneyWhole(amount)}
+          </Text>
+
+          {max > MIN_ASK_CENTS ? (
+            <>
+              <View style={styles.sliderRow}>
+                <StepButton
+                  label="−"
+                  accessibilityLabel="Decrease by $50"
+                  disabled={amount <= MIN_ASK_CENTS}
+                  onPress={() => nudge(-STEP_CENTS)}
+                />
+                <Slider
+                  accessibilityLabel="Amount to add"
+                  maximumTrackTintColor={color.rule}
+                  maximumValue={max / 100}
+                  minimumTrackTintColor={color.accent}
+                  minimumValue={MIN_ASK_CENTS / 100}
+                  onValueChange={(dollars) =>
+                    setAmount(Math.round((dollars * 100) / STEP_CENTS) * STEP_CENTS)}
+                  step={STEP_CENTS / 100}
+                  style={styles.slider}
+                  thumbTintColor={color.accent}
+                  value={amount / 100}
+                />
+                <StepButton
+                  label="+"
+                  accessibilityLabel="Increase by $50"
+                  disabled={amount >= max}
+                  onPress={() => nudge(STEP_CENTS)}
+                />
+              </View>
+              <View style={styles.rangeRow}>
+                <Text style={type.small}>{moneyWhole(MIN_ASK_CENTS)}</Text>
+                <Text style={type.small}>{moneyWhole(max)}</Text>
+              </View>
+            </>
+          ) : null}
+
+          <View style={styles.divider} />
+          <AccountRow label="New limit if approved" value={money(newLimit)} />
+        </View>
+
+        <View style={styles.mediumGap} />
+        <Note text="It won't affect your credit score. We use a soft inquiry." />
+        <Note text="You can only ask once, so pick the amount you'll want." />
+
+        <View style={styles.flex} />
+        <View style={styles.largeGap} />
+        <PrimaryButton
+          disabled={submitting}
+          label={submitting ? 'Submitting…' : 'Submit request'}
+          onPress={submit}
+        />
       </View>
-      <View style={styles.flex} />
-      <PrimaryButton
-        disabled={submitting}
-        label={submitting ? 'Submitting…' : 'Submit'}
-        onPress={submit}
-      />
-    </View>
+    </ScrollView>
   );
 }
 
 function ResultPage({
-  result,
-  error,
+  line,
+  outcome,
+  onRetry,
   onDone,
 }: {
-  result: ApiResult | null;
-  error: string | null;
+  line: CreditLine;
+  outcome: Outcome;
+  onRetry: () => void;
   onDone: () => void;
 }) {
-  let headline = 'Request not sent';
-  let detail = result && typeof result.body.message === 'string'
-    ? result.body.message
-    : result
-      ? 'The API answered HTTP ' + result.statusCode + '.'
-      : 'Please try again later.';
+  if (outcome.kind === 'failed') {
+    return (
+      <ResultFrame
+        headline="We couldn't confirm your request"
+        detail="Check your connection and try again. If it already went through, you'll see that decision, not a second request."
+        primary={{ label: 'Try again', onPress: onRetry }}
+        secondary={{ label: 'Back to Home', onPress: onDone }}
+      />
+    );
+  }
+  if (outcome.kind === 'invalid') {
+    return (
+      <ResultFrame
+        headline="That amount isn't available"
+        detail={outcome.message}
+        primary={{ label: 'Choose another amount', onPress: onRetry }}
+        secondary={{ label: 'Back to Home', onPress: onDone }}
+      />
+    );
+  }
 
-  if (error || !result || result.statusCode >= 500) {
-    headline = 'Something went wrong';
-    detail = 'Please try again later.';
-  } else if (result.body.status === 'APPROVED') {
-    headline = 'Approved';
-    detail = typeof result.body.new_limit_cents === 'number'
-      ? 'Your new limit is ' + money(result.body.new_limit_cents) + '.'
-      : 'Your limit went up.';
-  } else if (result.body.status === 'DECLINED') {
-    headline = 'Declined';
-    detail = "We can't increase your limit right now.";
+  const { request } = outcome;
+  if (request.status === 'APPROVED') {
+    return (
+      <ResultFrame
+        headline="Approved"
+        detail={'Your new limit is ' + money(request.newLimitCents) + ". It's ready to use now."}
+        primary={{ label: 'Back to Home', onPress: onDone }}
+      >
+        <View style={styles.card}>
+          <AccountRow label="Available to spend" value={money(availableCents(line, request.newLimitCents))} />
+        </View>
+      </ResultFrame>
+    );
   }
 
   return (
-    <View style={styles.page}>
-      <View style={styles.resultTopGap} />
-      <Text style={type.title}>{headline}</Text>
-      <View style={styles.smallGap} />
-      <Text style={type.bodyMuted}>{detail}</Text>
-      <View style={styles.flex} />
-      <PrimaryButton label="Back to Home" onPress={onDone} />
+    <ResultFrame
+      headline="We can't raise your limit right now"
+      detail={'Your limit stays at ' + money(line.limitCents) + '.'}
+      primary={{ label: 'Back to Home', onPress: onDone }}
+    >
+      <View style={styles.card}>
+        <DeclineReasons codes={request.reasonCodes} />
+      </View>
+      <View style={styles.mediumGap} />
+      <Note text="This was a soft inquiry. It didn't affect your credit score." />
+    </ResultFrame>
+  );
+}
+
+function ResultFrame({
+  headline,
+  detail,
+  primary,
+  secondary,
+  children,
+}: {
+  headline: string;
+  detail: string;
+  primary: { label: string; onPress: () => void };
+  secondary?: { label: string; onPress: () => void };
+  children?: React.ReactNode;
+}) {
+  return (
+    <ScrollView contentContainerStyle={styles.scroll}>
+      <View style={styles.page}>
+        <View style={styles.resultTopGap} />
+        <Text accessibilityRole="header" style={type.title}>{headline}</Text>
+        <View style={styles.smallGap} />
+        <Text style={type.bodyMuted}>{detail}</Text>
+        <View style={styles.topGap} />
+        {children}
+        <View style={styles.flex} />
+        <View style={styles.largeGap} />
+        <PrimaryButton label={primary.label} onPress={primary.onPress} />
+        {secondary ? (
+          <>
+            <View style={styles.smallGap} />
+            <SecondaryButton label={secondary.label} onPress={secondary.onPress} />
+          </>
+        ) : null}
+      </View>
+    </ScrollView>
+  );
+}
+
+function DeclineReasons({
+  codes,
+  copy = reasonCopy,
+}: {
+  codes: string[];
+  copy?: Record<string, string>;
+}) {
+  return (
+    <View>
+      <Text style={type.label}>WHY</Text>
+      <View style={styles.tinyGap} />
+      {codes.length === 0 ? (
+        <Text style={type.body}>We couldn't load the reason. Contact support and we'll explain.</Text>
+      ) : (
+        codes.map((code) => (
+          <View key={code} style={styles.bulletRow}>
+            <Text style={type.body}>{'•'}</Text>
+            <Text style={[type.body, styles.flex]}>
+              {copy[code] ?? 'Reason code ' + code + '. Contact support and we\'ll explain.'}
+            </Text>
+          </View>
+        ))
+      )}
+    </View>
+  );
+}
+
+function Note({ text }: { text: string }) {
+  return (
+    <View style={styles.bulletRow}>
+      <Text style={type.small}>{'•'}</Text>
+      <Text style={[type.small, styles.flex]}>{text}</Text>
     </View>
   );
 }
@@ -308,6 +686,63 @@ function AccountRow({ label, value }: { label: string; value: string }) {
     <View style={styles.accountRow}>
       <Text style={type.bodyMuted}>{label}</Text>
       <Text style={type.numeric}>{value}</Text>
+    </View>
+  );
+}
+
+// Demo-only switches, styled like the baseline persona control.
+function DemoPicker<T extends string>({
+  label,
+  value,
+  options,
+  describe,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: readonly T[];
+  describe: (option: T) => string;
+  onChange: (next: T) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <View style={styles.personaRow}>
+      <Text style={type.label}>{label}</Text>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={'Current ' + label.toLowerCase() + ': ' + describe(value)}
+        onPress={() => setOpen(true)}
+        style={styles.personaButton}
+      >
+        <Text numberOfLines={1} style={type.small}>{describe(value)}</Text>
+        <View style={styles.chevron} />
+      </Pressable>
+
+      <Modal animationType="fade" transparent visible={open} onRequestClose={() => setOpen(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setOpen(false)}>
+          <View style={styles.personaMenu}>
+            <Text style={type.heading}>{'Choose ' + label.toLowerCase()}</Text>
+            <View style={styles.smallGap} />
+            {options.map((option) => (
+              <Pressable
+                accessibilityRole="button"
+                key={option}
+                onPress={() => {
+                  onChange(option);
+                  setOpen(false);
+                }}
+                style={({ pressed }) => [
+                  styles.personaOption,
+                  option === value && styles.personaOptionSelected,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={option === value ? type.body : type.bodyMuted}>{describe(option)}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -322,6 +757,35 @@ function BackButton({ onPress }: { onPress: () => void }) {
       style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
     >
       <Text style={styles.backGlyph}>‹</Text>
+    </Pressable>
+  );
+}
+
+function StepButton({
+  label,
+  accessibilityLabel,
+  disabled,
+  onPress,
+}: {
+  label: string;
+  accessibilityLabel: string;
+  disabled: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole="button"
+      disabled={disabled}
+      hitSlop={8}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.stepButton,
+        disabled && styles.primaryButtonDisabled,
+        pressed && !disabled && styles.pressed,
+      ]}
+    >
+      <Text style={type.heading}>{label}</Text>
     </Pressable>
   );
 }
@@ -358,7 +822,7 @@ function SecondaryButton({ label, onPress }: { label: string; onPress: () => voi
       onPress={onPress}
       style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
     >
-      <Text style={type.body}>{label}</Text>
+      <Text style={[type.body, styles.centerText]}>{label}</Text>
     </Pressable>
   );
 }
@@ -368,6 +832,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: color.paper,
   },
+  scroll: { flexGrow: 1 },
   page: {
     alignSelf: 'center',
     backgroundColor: color.paper,
@@ -383,8 +848,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   centerText: { textAlign: 'center' },
+  numeric: { fontVariant: ['tabular-nums'] },
   topGap: { height: space.s5 },
   resultTopGap: { height: space.s7 },
+  largeGap: { height: space.s5 },
   mediumGap: { height: space.s4 },
   smallGap: { height: space.s2 },
   tinyGap: { height: space.s1 },
@@ -400,10 +867,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
+  bulletRow: {
+    flexDirection: 'row',
+    gap: space.s2,
+    marginBottom: space.s1,
+  },
   divider: {
     backgroundColor: color.rule,
     height: 1,
-    marginVertical: space.s4 / 2,
+    marginVertical: space.s3,
   },
   primaryButton: {
     alignItems: 'center',
@@ -424,14 +896,35 @@ const styles = StyleSheet.create({
     borderColor: color.rule,
     borderRadius: radius,
     borderWidth: 1,
+    minHeight: 46,
+    justifyContent: 'center',
     paddingHorizontal: space.s4,
     paddingVertical: space.s2,
   },
   pressed: { opacity: 0.72 },
+  sliderRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: space.s2,
+    marginTop: space.s2,
+  },
   slider: {
+    flex: 1,
     height: 44,
-    marginVertical: space.s2,
-    width: '100%',
+  },
+  stepButton: {
+    alignItems: 'center',
+    borderColor: color.rule,
+    borderRadius: 22,
+    borderWidth: 1,
+    height: 44,
+    justifyContent: 'center',
+    width: 44,
+  },
+  rangeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 52,
   },
   backButton: {
     alignItems: 'center',

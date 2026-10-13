@@ -13,3 +13,7 @@ node_modules/
 # Python
 __pycache__/
 *.pyc
+
+# Local
+.Rhistory
+.claude/
