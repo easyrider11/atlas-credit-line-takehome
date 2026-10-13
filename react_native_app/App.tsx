@@ -19,7 +19,9 @@ import { color, radius, space, type } from './src/tokens';
 // shipped increase flow in both arms. The arms differ only for members with no
 // room under their ceiling, who can never be approved:
 //   hidden - no entry point at all, the same Home the control group saw
-//   status - no entry point, plus a card that says why the limit is where it is
+//   status - no entry point, plus a card: no increase available, and why
+// A separate 5% holdback of members with room gets no increase feature (the
+// control experience); it is not part of this switch.
 const arms = ['hidden', 'status'] as const;
 type Arm = (typeof arms)[number];
 const armLabel: Record<Arm, string> = {
@@ -49,14 +51,6 @@ const statusReasonCopy: Record<string, string> = {
     'Your credit file shows high utilization on this card and / or other cards as of late.',
   INSUFFICIENT_PAYMENT_HISTORY: 'Your record of on-time payments with us is still short.',
   NEW_CREDIT_LINES: 'Your credit file shows a number of new credit lines opened recently.',
-};
-
-// General credit habits, not a promise: the ceiling is fixed, so nothing here
-// may suggest that doing these will raise this limit.
-const habitCopy: Record<string, string> = {
-  UTILIZATION_TOO_HIGH: 'Keeping balances well below your limits, on this card and others.',
-  INSUFFICIENT_PAYMENT_HISTORY: 'Paying at least the minimum on time, every month.',
-  NEW_CREDIT_LINES: 'Holding off on opening new credit lines for a while.',
 };
 
 type IncreaseRequest = {
@@ -223,6 +217,33 @@ export default function App() {
     }));
   };
 
+  // After an ambiguous failure the server may have decided and only the
+  // response was lost. Read the account before offering another submit.
+  // Resolves false when the account can't be read, so the caller keeps the
+  // uncertain state instead of assuming nothing was sent.
+  const reconcile = async () => {
+    let fresh: CreditLine;
+    try {
+      const response = await api.getCreditLine();
+      if (!response.isSuccess) return false;
+      fresh = parseCreditLine(response.body);
+    } catch {
+      return false;
+    }
+    if (fresh.increaseRequest) {
+      setScreen({
+        name: 'result',
+        line: fresh,
+        outcome: { kind: 'decided', request: fresh.increaseRequest },
+      });
+    } else if (canIncrease(fresh)) {
+      setScreen({ name: 'request', line: fresh });
+    } else {
+      goHome();
+    }
+    return true;
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="dark" />
@@ -246,6 +267,7 @@ export default function App() {
           line={screen.line}
           outcome={screen.outcome}
           onRetry={() => setScreen({ name: 'request', line: screen.line })}
+          onReconcile={reconcile}
           onDone={goHome}
         />
       )}
@@ -378,31 +400,19 @@ function HomePage({
   );
 }
 
-// Arm B, members with no room only. Answers the question a decline would have
-// answered (why), without a request that can only fail and its soft inquiry.
+// Arm B, members with no room only. States the limit, that no increase is
+// available, and the specific reasons; nothing else, so the arm tests the
+// explanation alone. No request is made, so there is no soft inquiry.
 function LimitStatusCard({ line }: { line: CreditLine }) {
-  const habits = line.noRoomReasons.filter((code) => habitCopy[code]);
   return (
     <View style={styles.card}>
-      <Text style={type.label}>YOUR LIMIT</Text>
+      <Text style={type.label}>LIMIT INCREASE</Text>
       <View style={styles.smallGap} />
-      <Text style={type.heading}>
-        {moneyWhole(line.limitCents) + ' is the most we can offer you right now'}
-      </Text>
+      <Text style={type.heading}>An increase isn't available on your account</Text>
       <View style={styles.tinyGap} />
-      <Text style={type.small}>
-        So you're not left guessing, here's what it's based on. There's nothing to apply for.
-      </Text>
+      <Text style={type.small}>{'Your credit limit is ' + moneyWhole(line.limitCents) + '.'}</Text>
       <View style={styles.mediumGap} />
       <DeclineReasons codes={line.noRoomReasons} copy={statusReasonCopy} />
-      {habits.length > 0 ? (
-        <>
-          <View style={styles.smallGap} />
-          <Text style={type.label}>GOOD FOR YOUR CREDIT IN GENERAL</Text>
-          <View style={styles.tinyGap} />
-          {habits.map((code) => <Note key={code} text={habitCopy[code]} />)}
-        </>
-      ) : null}
     </View>
   );
 }
@@ -551,22 +561,17 @@ function ResultPage({
   line,
   outcome,
   onRetry,
+  onReconcile,
   onDone,
 }: {
   line: CreditLine;
   outcome: Outcome;
   onRetry: () => void;
+  onReconcile: () => Promise<boolean>;
   onDone: () => void;
 }) {
   if (outcome.kind === 'failed') {
-    return (
-      <ResultFrame
-        headline="We couldn't confirm your request"
-        detail="Check your connection and try again. If it already went through, you'll see that decision, not a second request."
-        primary={{ label: 'Try again', onPress: onRetry }}
-        secondary={{ label: 'Back to Home', onPress: onDone }}
-      />
-    );
+    return <UncertainResult onReconcile={onReconcile} onDone={onDone} />;
   }
   if (outcome.kind === 'invalid') {
     return (
@@ -609,6 +614,39 @@ function ResultPage({
   );
 }
 
+// The request may or may not have been decided. Never offer a resubmit from
+// here: only the account can say whether one is safe.
+function UncertainResult({
+  onReconcile,
+  onDone,
+}: {
+  onReconcile: () => Promise<boolean>;
+  onDone: () => void;
+}) {
+  const [checking, setChecking] = useState(false);
+  const [unreachable, setUnreachable] = useState(false);
+
+  const check = async () => {
+    setChecking(true);
+    // On success the screen changes and this component unmounts.
+    if (!(await onReconcile())) {
+      setChecking(false);
+      setUnreachable(true);
+    }
+  };
+
+  return (
+    <ResultFrame
+      headline="We couldn't confirm your request"
+      detail={unreachable
+        ? "We still can't reach your account. Your request may have gone through, so we won't send another until we can check."
+        : "Your request may have gone through. We'll check your account before you can ask again, so it's never sent twice."}
+      primary={{ label: checking ? 'Checking…' : 'Check status', onPress: check, disabled: checking }}
+      secondary={{ label: 'Back to Home', onPress: onDone }}
+    />
+  );
+}
+
 function ResultFrame({
   headline,
   detail,
@@ -618,7 +656,7 @@ function ResultFrame({
 }: {
   headline: string;
   detail: string;
-  primary: { label: string; onPress: () => void };
+  primary: { label: string; onPress: () => void; disabled?: boolean };
   secondary?: { label: string; onPress: () => void };
   children?: React.ReactNode;
 }) {
@@ -633,7 +671,11 @@ function ResultFrame({
         {children}
         <View style={styles.flex} />
         <View style={styles.largeGap} />
-        <PrimaryButton label={primary.label} onPress={primary.onPress} />
+        <PrimaryButton
+          disabled={primary.disabled}
+          label={primary.label}
+          onPress={primary.onPress}
+        />
         {secondary ? (
           <>
             <View style={styles.smallGap} />

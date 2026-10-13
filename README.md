@@ -31,15 +31,21 @@ On web you can also link straight to a combination:
 
 The mock API keeps state in memory and allows one request per persona. Restart it to reset.
 
-## Experiment groups
+## Allocation
 
-The arms differ only for members with no room under their ceiling (23% of signups).
-Everyone with room gets the increase flow, with the slider capped at their room.
+Members are split by room at signup (ceiling minus starting limit), and each side has its own split:
 
-| Arm | Member with room | Member with no room |
+| Members | Share of signups | Groups |
 |---|---|---|
-| A · hidden | Increase flow | No entry point (what control saw) |
-| B · status | Increase flow | No entry point, plus a card on Home with the reasons for their limit |
+| Room > 0 | 77% | 95% revised request flow, with the slider capped at their room · 5% holdback with no increase feature |
+| Room = 0 | 23% | 50% **A · hidden**: no entry point, what control saw · 50% **B · status**: a card on Home with the current limit, that no increase is available, and the specific reasons |
+
+The holdback checks that the gain persists now that the flow has changed. It is separate from the
+no-room experiment, and 5% is an operational choice, not an allocation sized from the analysis.
+
+The demo's **ARM** switch covers the no-room experiment; for a member with room it always shows the
+revised flow. The holdback sees the control experience (no entry point), so it needs no new screens.
+Assignment itself is not built; production would randomize at signup.
 
 ## Check it
 
@@ -53,8 +59,17 @@ cd mock-api && ./smoke.sh
 
 `smoke.sh` needs a freshly started mock API. Journeys checked by hand in the running web app at
 375×812: approval goes live and Home reloads; the slider stops at the member's room; a duplicate
-submit (409) shows the decision already made, with reasons; the API down shows a retry that then
-succeeds; a no-room member sees nothing in arm A and the status card in arm B.
+submit (409) shows the decision already made, with reasons; a no-room member sees nothing in arm A
+and the status card in arm B.
+
+Lost responses were tested by wrapping `fetch` in the page so the POST reached the server but its
+response was dropped. In every case "Check status" reads the account before allowing another submit:
+
+| Case | Requests the app made | Result |
+|---|---|---|
+| Server decided, response lost | POST, GET | Shows the server's decision; no second POST |
+| Request never reached the server | POST, GET, POST | Account has no request, so it allows a resubmit; approved |
+| Response lost and account read fails | POST, GET (fails), GET | Stays "can't confirm" with no submit offered; shows the decision once the account loads |
 
 Analysis (each script takes the data folder and runs in under a minute):
 
