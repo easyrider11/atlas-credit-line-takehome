@@ -349,7 +349,7 @@ function HomePage({
   return (
     <ScrollView contentContainerStyle={styles.scroll}>
       <View style={styles.page}>
-        <Text style={type.title}>Your credit line</Text>
+        <Text accessibilityRole="header" style={type.title}>Your credit line</Text>
         <View style={styles.topGap} />
 
         {loading ? (
@@ -365,7 +365,7 @@ function HomePage({
         ) : (
           <View style={styles.flex}>
             <View style={styles.card}>
-              <Text style={type.label}>AVAILABLE TO SPEND</Text>
+              <Text style={styles.label}>AVAILABLE TO SPEND</Text>
               <View style={styles.tinyGap} />
               <Text style={[type.display, styles.numeric]}>{money(availableCents(line))}</Text>
               <View style={styles.divider} />
@@ -404,6 +404,8 @@ function HomePage({
         )}
 
         <View style={styles.largeGap} />
+        <View style={styles.demoDivider} />
+        <Text style={type.small}>Demo controls · not part of the member's app</Text>
         <DemoPicker
           label="PERSONA"
           value={persona}
@@ -441,7 +443,7 @@ function HomePage({
 function LimitStatusCard({ line }: { line: CreditLine }) {
   return (
     <View style={styles.card}>
-      <Text style={type.label}>LIMIT INCREASE</Text>
+      <Text style={styles.label}>LIMIT INCREASE</Text>
       <View style={styles.smallGap} />
       <Text style={type.heading}>An increase isn't available on your account</Text>
       <View style={styles.tinyGap} />
@@ -460,7 +462,7 @@ function PastRequestCard({ line, request }: { line: CreditLine; request: Increas
   if (request.status === 'APPROVED') {
     return (
       <View style={styles.card}>
-        <Text style={type.label}>LIMIT INCREASE</Text>
+        <Text style={styles.label}>LIMIT INCREASE</Text>
         <View style={styles.smallGap} />
         <Text style={type.body}>
           {'You added ' + moneyWhole(request.approvedCents) + ' to your limit' +
@@ -471,7 +473,7 @@ function PastRequestCard({ line, request }: { line: CreditLine; request: Increas
   }
   return (
     <View style={styles.card}>
-      <Text style={type.label}>LIMIT INCREASE REQUEST</Text>
+      <Text style={styles.label}>LIMIT INCREASE REQUEST</Text>
       <View style={styles.smallGap} />
       <Text style={type.body}>
         {'Your request' + (when ? ' on ' + when : '') + " wasn't approved. Your limit stays at " +
@@ -519,7 +521,7 @@ function RequestPage({
     <ScrollView contentContainerStyle={styles.scroll}>
       <View style={styles.page}>
         <BackButton onPress={onBack} />
-        <Text style={type.title}>Request an increase</Text>
+        <Text accessibilityRole="header" style={type.title}>Request an increase</Text>
         <View style={styles.smallGap} />
         <Text style={type.bodyMuted}>
           {'Choose how much to add to your ' + moneyWhole(line.limitCents) + ' limit.'}
@@ -527,7 +529,7 @@ function RequestPage({
         <View style={styles.topGap} />
 
         <View style={styles.card}>
-          <Text style={[type.label, styles.centerText]}>INCREASE BY</Text>
+          <Text style={[styles.label, styles.centerText]}>INCREASE BY</Text>
           <View style={styles.tinyGap} />
           <Text
             accessibilityLiveRegion="polite"
@@ -545,29 +547,35 @@ function RequestPage({
                   disabled={amount <= MIN_ASK_CENTS}
                   onPress={() => nudge(-STEP_CENTS)}
                 />
-                <Slider
-                  accessibilityLabel="Amount to add"
-                  maximumTrackTintColor={color.rule}
-                  maximumValue={max / 100}
-                  minimumTrackTintColor={color.accent}
-                  minimumValue={MIN_ASK_CENTS / 100}
-                  onValueChange={(dollars) =>
-                    setAmount(Math.round((dollars * 100) / STEP_CENTS) * STEP_CENTS)}
-                  step={STEP_CENTS / 100}
-                  style={styles.slider}
-                  thumbTintColor={color.accent}
-                  value={amount / 100}
-                />
+                <View style={styles.flex}>
+                  <Slider
+                    accessibilityLabel="Amount to add"
+                    aria-valuemin={MIN_ASK_CENTS / 100}
+                    aria-valuemax={max / 100}
+                    aria-valuenow={amount / 100}
+                    aria-valuetext={moneyWhole(amount) + ' of up to ' + moneyWhole(max)}
+                    maximumTrackTintColor={color.rule}
+                    maximumValue={max / 100}
+                    minimumTrackTintColor={color.accent}
+                    minimumValue={MIN_ASK_CENTS / 100}
+                    onValueChange={(dollars) =>
+                      setAmount(Math.round((dollars * 100) / STEP_CENTS) * STEP_CENTS)}
+                    step={STEP_CENTS / 100}
+                    style={styles.slider}
+                    thumbTintColor={color.accent}
+                    value={amount / 100}
+                  />
+                  <View style={styles.rangeRow}>
+                    <Text style={type.small}>{moneyWhole(MIN_ASK_CENTS)}</Text>
+                    <Text style={type.small}>{moneyWhole(max)}</Text>
+                  </View>
+                </View>
                 <StepButton
                   label="+"
                   accessibilityLabel="Increase by $50"
                   disabled={amount >= max}
                   onPress={() => nudge(STEP_CENTS)}
                 />
-              </View>
-              <View style={styles.rangeRow}>
-                <Text style={type.small}>{moneyWhole(MIN_ASK_CENTS)}</Text>
-                <Text style={type.small}>{moneyWhole(max)}</Text>
               </View>
             </>
           ) : null}
@@ -576,13 +584,13 @@ function RequestPage({
           <AccountRow label="New limit if approved" value={money(newLimit)} />
         </View>
 
-        <View style={styles.mediumGap} />
-        <Note text="It won't affect your credit score. We use a soft inquiry." />
-        <Note text="You can only ask once, so pick the amount you'll want." />
-
         <View style={styles.flex} />
         <View style={styles.largeGap} />
+        <Note text="It won't affect your credit score. We use a soft inquiry." />
+        <Note text="You can only ask once, so pick the amount you'll want." />
+        <View style={styles.smallGap} />
         <PrimaryButton
+          busy={submitting}
           disabled={submitting}
           label={submitting ? 'Submitting…' : 'Submit request'}
           onPress={submit}
@@ -624,10 +632,17 @@ function ResultPage({
     return (
       <ResultFrame
         headline="Approved"
-        detail={'Your new limit is ' + money(request.newLimitCents) + ". It's ready to use now."}
+        detail={'You added ' + moneyWhole(request.approvedCents) + ". It's ready to use now."}
         primary={{ label: 'Back to Home', onPress: onDone }}
       >
         <View style={styles.card}>
+          <AccountRow
+            label="Previous limit"
+            value={money(request.newLimitCents - request.approvedCents)}
+          />
+          <View style={styles.smallGap} />
+          <AccountRow label="New limit" value={money(request.newLimitCents)} />
+          <View style={styles.divider} />
           <AccountRow label="Available to spend" value={money(availableCents(line, request.newLimitCents))} />
         </View>
       </ResultFrame>
@@ -676,7 +691,12 @@ function UncertainResult({
       detail={unreachable
         ? "We still can't reach your account. Your request may have gone through, so we won't send another until we can check."
         : "Your request may have gone through. We'll check your account before you can ask again, so it's never sent twice."}
-      primary={{ label: checking ? 'Checking…' : 'Check status', onPress: check, disabled: checking }}
+      primary={{
+        label: checking ? 'Checking…' : 'Check status',
+        onPress: check,
+        disabled: checking,
+        busy: checking,
+      }}
       secondary={{ label: 'Back to Home', onPress: onDone }}
     />
   );
@@ -691,7 +711,7 @@ function ResultFrame({
 }: {
   headline: string;
   detail: string;
-  primary: { label: string; onPress: () => void; disabled?: boolean };
+  primary: { label: string; onPress: () => void; disabled?: boolean; busy?: boolean };
   secondary?: { label: string; onPress: () => void };
   children?: React.ReactNode;
 }) {
@@ -707,6 +727,7 @@ function ResultFrame({
         <View style={styles.flex} />
         <View style={styles.largeGap} />
         <PrimaryButton
+          busy={primary.busy}
           disabled={primary.disabled}
           label={primary.label}
           onPress={primary.onPress}
@@ -731,7 +752,7 @@ function DeclineReasons({
 }) {
   return (
     <View>
-      <Text style={type.label}>WHY</Text>
+      <Text style={styles.label}>WHY</Text>
       <View style={styles.tinyGap} />
       {codes.length === 0 ? (
         <Text style={type.body}>We couldn't load the reason. Contact support and we'll explain.</Text>
@@ -784,7 +805,7 @@ function DemoPicker<T extends string>({
   const [open, setOpen] = useState(false);
   return (
     <View style={styles.personaRow}>
-      <Text style={type.label}>{label}</Text>
+      <Text style={styles.label}>{label}</Text>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={'Current ' + label.toLowerCase() + ': ' + describe(value)}
@@ -871,23 +892,29 @@ function PrimaryButton({
   label,
   onPress,
   disabled = false,
+  busy = false,
 }: {
   label: string;
   onPress: () => void;
   disabled?: boolean;
+  busy?: boolean;
 }) {
   return (
     <Pressable
       accessibilityRole="button"
+      aria-busy={busy}
       disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [
         styles.primaryButton,
-        disabled && styles.primaryButtonDisabled,
+        disabled && !busy && styles.primaryButtonDisabled,
         pressed && !disabled && styles.pressed,
       ]}
     >
-      <Text style={styles.primaryButtonText}>{label}</Text>
+      <View style={styles.buttonContent}>
+        {busy ? <ActivityIndicator color={color.accentInk} size="small" /> : null}
+        <Text style={styles.primaryButtonText}>{label}</Text>
+      </View>
     </Pressable>
   );
 }
@@ -926,6 +953,14 @@ const styles = StyleSheet.create({
   },
   centerText: { textAlign: 'center' },
   numeric: { fontVariant: ['tabular-nums'] },
+  // Token label style in ink2: ink3 measures 2.9-3.1:1 on paper and surface,
+  // under the 4.5:1 small text needs.
+  label: { ...type.label, color: color.ink2 },
+  demoDivider: {
+    backgroundColor: color.rule,
+    height: 1,
+    marginBottom: space.s3,
+  },
   topGap: { height: space.s5 },
   resultTopGap: { height: space.s7 },
   largeGap: { height: space.s5 },
@@ -964,6 +999,11 @@ const styles = StyleSheet.create({
     paddingVertical: space.s3,
   },
   primaryButtonDisabled: { opacity: 0.45 },
+  buttonContent: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: space.s2,
+  },
   primaryButtonText: {
     ...type.body,
     color: color.accentInk,
@@ -1001,15 +1041,14 @@ const styles = StyleSheet.create({
   rangeRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingHorizontal: 52,
   },
   backButton: {
     alignItems: 'center',
-    height: 36,
+    height: 44,
     justifyContent: 'center',
-    marginBottom: space.s2,
-    marginLeft: -space.s2,
-    width: 36,
+    marginBottom: space.s1,
+    marginLeft: -space.s3,
+    width: 44,
   },
   backGlyph: {
     color: color.ink,
@@ -1025,7 +1064,7 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    minHeight: 40,
+    minHeight: 44,
   },
   chevron: {
     borderBottomColor: color.ink2,
