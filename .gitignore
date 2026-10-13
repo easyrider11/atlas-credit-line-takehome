@@ -17,3 +17,6 @@ __pycache__/
 # Local
 .Rhistory
 .claude/
+
+# Atlas take-home dataset: not redistributed (see data/README.md)
+data/*.csv

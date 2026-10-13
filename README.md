@@ -74,7 +74,8 @@ response was dropped. In every case "Check status" reads the account before allo
 | Request never reached the server | POST, GET, POST | Account has no request, so it allows a resubmit; approved |
 | Response lost and account read fails | POST, GET (fails), GET | Stays "can't confirm" with no submit offered; shows the decision once the account loads |
 
-Analysis (each script takes the data folder and runs in under a minute):
+Analysis (each script takes the data folder and runs in under a minute). The CSVs are Atlas's and
+are not in this repo; copy them from the take-home zip into `data/` first (see `data/README.md`):
 
 ```bash
 python3 analysis/retention.py data
