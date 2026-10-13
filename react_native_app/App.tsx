@@ -15,18 +15,24 @@ import {
 import { ApiClient, ApiResult, JsonObject, Persona, personas } from './src/apiClient';
 import { color, radius, space, type } from './src/tokens';
 
-// Arms of the next experiment (see DECISIONS.pdf). Members with room get the
-// shipped increase flow in both arms. The arms differ only for members with no
-// room under their ceiling, who can never be approved:
-//   hidden - no entry point at all, the same Home the control group saw
-//   status - no entry point, plus a card: no increase available, and why
-// A separate 5% holdback of members with room gets no increase feature (the
-// control experience); it is not part of this switch.
-const arms = ['hidden', 'status'] as const;
-type Arm = (typeof arms)[number];
-const armLabel: Record<Arm, string> = {
-  hidden: 'A · No room: hidden',
-  status: 'B · No room: limit status',
+// Experiment groups (see DECISIONS.pdf): two separate splits, by whether the
+// member had room under their ceiling at signup.
+//   Room:     flow 95%     - the revised request flow
+//             holdback 5%  - no increase feature, the control experience
+//   No room:  hidden 50%   - A: no entry point, the same Home control saw
+//             status 50%   - B: no entry point, plus a card: no increase
+//                            available, and why
+// The demo GROUP switch offers only the pair that applies to the member shown.
+// Assignment itself (randomizing at signup) is not built.
+const roomGroups = ['flow', 'holdback'] as const;
+const noRoomGroups = ['hidden', 'status'] as const;
+type RoomGroup = (typeof roomGroups)[number];
+type NoRoomGroup = (typeof noRoomGroups)[number];
+const groupLabel: Record<RoomGroup | NoRoomGroup, string> = {
+  flow: 'Room · revised flow (95%)',
+  holdback: 'Room · holdback, no feature (5%)',
+  hidden: 'No room · A hidden (50%)',
+  status: 'No room · B status card (50%)',
 };
 
 // Bounds of POST /v1/credit-line/increase-requests.
@@ -68,7 +74,9 @@ type CreditLine = {
   balanceCents: number;
   holdsCents: number;
   increaseRequest: IncreaseRequest | null;
-  // Why a member with no room has none. Set at signup, like the ceiling.
+  // Whether the member had room at signup, and if not, why. Set at signup,
+  // like the ceiling, so it decides which experiment split they are in.
+  roomAtSignup: boolean;
   noRoomReasons: string[];
 };
 
@@ -142,6 +150,10 @@ function parseCreditLine(body: JsonObject): CreditLine {
     balanceCents: numberField(body, 'balance_cents'),
     holdsCents: numberField(body, 'pending_holds_cents'),
     increaseRequest: parseIncreaseRequest(body.increase_request),
+    roomAtSignup: eligibility !== null && typeof eligibility === 'object'
+      && typeof (eligibility as JsonObject).eligible === 'boolean'
+      ? (eligibility as JsonObject).eligible === true
+      : numberField(body, 'max_eligible_limit_cents') - numberField(body, 'limit_cents') >= MIN_ASK_CENTS,
     noRoomReasons: eligibility !== null && typeof eligibility === 'object'
       ? stringList((eligibility as JsonObject).reason_codes)
       : [],
@@ -165,13 +177,13 @@ function canIncrease(line: CreditLine) {
   return line.increaseRequest === null && maxAskCents(line) >= MIN_ASK_CENTS;
 }
 
-// Has never asked and never could: the only members the two arms treat differently.
+// Has never asked and never could: the members arms A and B treat differently.
 function hasNoRoom(line: CreditLine) {
   return line.increaseRequest === null && maxAskCents(line) < MIN_ASK_CENTS;
 }
 
-// Web demo only: ?persona=insufficient-history&arm=status opens straight into a
-// combination, so reviewers can link to each experiment group.
+// Web demo only: ?persona=insufficient-history&group=status opens straight into
+// a combination, so reviewers can link to each experiment group.
 function demoParam<T extends string>(name: string, options: readonly T[]): T | null {
   const search = typeof window !== 'undefined' ? window.location?.search : undefined;
   if (!search) return null;
@@ -207,7 +219,12 @@ export default function App() {
     client.persona = demoParam('persona', personas) ?? client.persona;
     return client;
   }, []);
-  const [arm, setArm] = useState<Arm>(() => demoParam('arm', arms) ?? 'hidden');
+  const [roomGroup, setRoomGroup] = useState<RoomGroup>(
+    () => demoParam('group', roomGroups) ?? 'flow',
+  );
+  const [noRoomGroup, setNoRoomGroup] = useState<NoRoomGroup>(
+    () => demoParam('group', noRoomGroups) ?? 'hidden',
+  );
   const [screen, setScreen] = useState<Screen>({ name: 'home', refreshKey: 0 });
 
   const goHome = () => {
@@ -250,8 +267,10 @@ export default function App() {
       {screen.name === 'home' ? (
         <HomePage
           api={api}
-          arm={arm}
-          onArmChange={setArm}
+          roomGroup={roomGroup}
+          noRoomGroup={noRoomGroup}
+          onRoomGroupChange={setRoomGroup}
+          onNoRoomGroupChange={setNoRoomGroup}
           refreshKey={screen.refreshKey}
           onIncrease={(line) => setScreen({ name: 'request', line })}
         />
@@ -277,14 +296,18 @@ export default function App() {
 
 function HomePage({
   api,
-  arm,
-  onArmChange,
+  roomGroup,
+  noRoomGroup,
+  onRoomGroupChange,
+  onNoRoomGroupChange,
   refreshKey,
   onIncrease,
 }: {
   api: ApiClient;
-  arm: Arm;
-  onArmChange: (arm: Arm) => void;
+  roomGroup: RoomGroup;
+  noRoomGroup: NoRoomGroup;
+  onRoomGroupChange: (group: RoomGroup) => void;
+  onNoRoomGroupChange: (group: NoRoomGroup) => void;
   refreshKey: number;
   onIncrease: (line: CreditLine) => void;
 }) {
@@ -364,14 +387,14 @@ function HomePage({
               </>
             ) : null}
 
-            {arm === 'status' && hasNoRoom(line) ? (
+            {noRoomGroup === 'status' && hasNoRoom(line) ? (
               <>
                 <View style={styles.mediumGap} />
                 <LimitStatusCard line={line} />
               </>
             ) : null}
 
-            {canIncrease(line) ? (
+            {roomGroup === 'flow' && canIncrease(line) ? (
               <>
                 <View style={styles.largeGap} />
                 <PrimaryButton label="Request an increase" onPress={() => onIncrease(line)} />
@@ -388,13 +411,25 @@ function HomePage({
           describe={(option) => option}
           onChange={choosePersona}
         />
-        <DemoPicker
-          label="ARM"
-          value={arm}
-          options={arms}
-          describe={(option) => armLabel[option]}
-          onChange={onArmChange}
-        />
+        {line && !loading ? (
+          line.roomAtSignup ? (
+            <DemoPicker
+              label="GROUP"
+              value={roomGroup}
+              options={roomGroups}
+              describe={(option) => groupLabel[option]}
+              onChange={onRoomGroupChange}
+            />
+          ) : (
+            <DemoPicker
+              label="GROUP"
+              value={noRoomGroup}
+              options={noRoomGroups}
+              describe={(option) => groupLabel[option]}
+              onChange={onNoRoomGroupChange}
+            />
+          )
+        ) : null}
       </View>
     </ScrollView>
   );

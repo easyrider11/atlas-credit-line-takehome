@@ -19,15 +19,17 @@ cd react_native_app && npm install && npm run web
 ```
 
 Open http://localhost:8081. At the bottom of Home there are two separate demo switches:
-**PERSONA** (which member you are, from the mock API) and **ARM** (the experiment group).
+**PERSONA** (which member you are, from the mock API) and **GROUP** (the experiment group). GROUP only
+offers the groups that apply to that member: revised flow or holdback for a member with room, A or B
+for a member with none.
 On web you can also link straight to a combination:
 
 | What you see | Link |
 |---|---|
-| No-room member, arm A (hidden) | http://localhost:8081/?persona=insufficient-history&arm=hidden |
-| No-room member, arm B (limit status card) | http://localhost:8081/?persona=insufficient-history&arm=status |
-| Member with $800 of room (same in both arms) | http://localhost:8081/?persona=utilization-too-high&arm=status |
-| Member with $2,500 of room (same in both arms) | http://localhost:8081/?persona=approved&arm=hidden |
+| Room, revised flow (95%) | http://localhost:8081/?persona=utilization-too-high&group=flow |
+| Room, holdback with no feature (5%) | http://localhost:8081/?persona=utilization-too-high&group=holdback |
+| No room, A hidden (50%) | http://localhost:8081/?persona=insufficient-history&group=hidden |
+| No room, B status card (50%) | http://localhost:8081/?persona=insufficient-history&group=status |
 
 The mock API keeps state in memory and allows one request per persona. Restart it to reset.
 
@@ -43,9 +45,8 @@ Members are split by room at signup (ceiling minus starting limit), and each sid
 The holdback checks that the gain persists now that the flow has changed. It is separate from the
 no-room experiment, and 5% is an operational choice, not an allocation sized from the analysis.
 
-The demo's **ARM** switch covers the no-room experiment; for a member with room it always shows the
-revised flow. The holdback sees the control experience (no entry point), so it needs no new screens.
-Assignment itself is not built; production would randomize at signup.
+The demo's **GROUP** switch shows each of these four experiences; the holdback is the control
+experience (no entry point). Assignment itself is not built; production would randomize at signup.
 
 ## Check it
 
@@ -59,8 +60,8 @@ cd mock-api && ./smoke.sh
 
 `smoke.sh` needs a freshly started mock API. Journeys checked by hand in the running web app at
 375×812: approval goes live and Home reloads; the slider stops at the member's room; a duplicate
-submit (409) shows the decision already made, with reasons; a no-room member sees nothing in arm A
-and the status card in arm B.
+submit (409) shows the decision already made, with reasons; each GROUP shows its experience (holdback
+and A: no entry point; B: the status card; revised flow: the request button).
 
 Lost responses were tested by wrapping `fetch` in the page so the POST reached the server but its
 response was dropped. In every case "Check status" reads the account before allowing another submit:

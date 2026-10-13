@@ -7,10 +7,10 @@
   @page { size: Letter; margin: 0.4in 0.5in; }
   :root { --ink:#14181B; --ink2:#5A6467; --rule:#E1E6E1; --accent:#0B5049; --soft:#E0ECE9; --crit:#8A2E2E; --critSoft:#F7E7E5; }
   * { box-sizing: border-box; }
-  body { font: 8.85pt/1.34 -apple-system, "Helvetica Neue", Arial, sans-serif; color: var(--ink); margin: 0; background: #fff; }
+  body { font: 8.8pt/1.31 -apple-system, "Helvetica Neue", Arial, sans-serif; color: var(--ink); margin: 0; background: #fff; }
   h1 { font-size: 15pt; margin: 0 0 2px; letter-spacing: -0.2px; }
   .sub { color: var(--ink2); margin: 0 0 8px; }
-  h2 { font-size: 7.6pt; text-transform: uppercase; letter-spacing: 0.8px; color: var(--accent); margin: 9px 0 3px; }
+  h2 { font-size: 7.6pt; text-transform: uppercase; letter-spacing: 0.8px; color: var(--accent); margin: 8px 0 3px; }
   p { margin: 0 0 4px; }
   ul { margin: 0 0 4px; padding-left: 14px; }
   li { margin: 0 0 2px; }
@@ -33,7 +33,7 @@
 <p class="sub">Data: 1,000,000 members (500,226 control / 499,774 treatment), joined Jun 1 – Aug 9, snapshot Aug 25. Retention = account still open N days after joining, among members with at least N days of tenure.</p>
 
 <div class="decision"><b>Decision: ship to members with room, switch it off for members with none.</b>
-Not a plain ship. The average result is flat because it adds a large gain and a large loss. Members whose ceiling is above their limit get the flow, with the slider capped at their room. Members with no room see no entry point. Projected 30-day retention: <b>~92.4% vs 87.8%</b> in control (+4.6 pts). A 5% no-feature holdback among members with room checks that the gain holds for the revised flow (see allocation).</div>
+Not a plain ship. The average result is flat because it adds a large gain and a large loss. Members whose ceiling is above their limit get the flow, with the slider capped at their room. Members with no room see no entry point. If the revised flow keeps the measured gain and no-room members return to control levels, 30-day retention would be <b>~92.2% vs 87.8%</b> (+4.4 pts, counting the 5% holdback). The holdback checks the first assumption; arm A checks the second.</div>
 
 <h2>Evidence</h2>
 <table>
@@ -44,14 +44,14 @@ Not a plain ship. The average result is flat because it adds a large gain and a 
 </table>
 <div class="cols">
 <ul>
-  <li><b>Every request from a no-room member was declined: 110,199 of 110,199.</b> The app let them ask for something that could not be approved, and ran a soft inquiry to tell them so.</li>
-  <li><b>The decline does the damage, not the reason or the ask.</b> Declined members keep ~68% whatever the reason code (67.8–68.6%) and whatever they asked for (67.6–68.3%). No-room treatment members close at 3.5%/day in their first week vs 0.43%/day in control.</li>
-  <li><b>The money doesn't drive the gain.</b> Approved members retain 93.6–94.2% at every ask size and every share of room taken. Members with room who never asked retain 93.5%.</li>
+  <li><b>Every request from a no-room member was declined: 110,199 of 110,199.</b> The app let them ask for something that could not be approved.</li>
+  <li><b>The feature hurt no-room members; we suspect the decline contributes.</b> The −19.9 pts is a randomized effect of the feature. The data can't separate the decline from disappointment, expectations or the rest of the experience. Consistent with a decline effect: ~68% whatever the reason code (67.8–68.6%) or ask (67.6–68.3%), and 3.5%/day closures in week one vs 0.43% in control.</li>
+  <li><b>Ask size isn't associated with retention.</b> Approved members retain 93.6–94.2% at every ask size and share of room; members with room who never asked retain 93.5%. Self-selected groups, so descriptive.</li>
 </ul>
 <ul>
-  <li><b>The gain arrives late and for everyone in treatment.</b> Among members still open at day 15, 0.2–0.3% close by day 30 in every treatment subgroup (approved, never asked, even declined) vs 6.55% in control. The room &gt; 0 gain grows to +7.5 pts at 60 days.</li>
-  <li><b>It's stable:</b> same sign and size in all 8 readable join weeks and all four starting limits; room and limit mix are balanced across groups. The 14-day ITT reads −6.0 pts only because the decline burst comes first.</li>
-  <li class="muted small">Data notes: 18,438 approved asks are for $50, below the $100 API minimum (same retention). Approved members show a closure spike the day after asking, but it's timing, not harm: 5.98% closed by day 14 vs 6.00% in control.</li>
+  <li><b>The gain shows up late.</b> Among members open at day 15, 0.2–0.3% close by day 30 in each treatment subgroup (approved, never asked, declined; descriptive) vs 6.55% in control. The randomized room &gt; 0 gain grows to +7.5 pts at 60 days.</li>
+  <li><b>It's stable:</b> same sign and size in all 8 readable join weeks and all four starting limits; room and limit mix are balanced across groups. The 14-day ITT reads −6.0 pts because the no-room losses come before the room &gt; 0 gain appears.</li>
+  <li class="muted small">Data notes: 18,438 approved asks are for $50, below the $100 API minimum (same retention). A closure spike the day after approval doesn't show as extra churn (5.98% of approved closed by day 14 vs 6.00% in control); likely request timing.</li>
 </ul>
 </div>
 
@@ -61,27 +61,24 @@ Not a plain ship. The average result is flat because it adds a large gain and a 
   <tr><td>Room &gt; 0</td><td>77%</td><td>95% revised request flow · 5% holdback with no increase feature</td></tr>
   <tr><td>Room = 0</td><td>23%</td><td>50% A · hidden · 50% B · limit status card (the next experiment, below)</td></tr>
 </table>
-<p class="muted small">The holdback confirms the gain persists now that the flow has changed. It is not part of the no-room experiment, and 5% is an operational choice, not an allocation sized from this analysis.</p>
+<p class="muted small">The holdback checks whether the gain persists for the revised flow. It is separate from the no-room experiment; 5% is an operational choice, not sized from this analysis.</p>
 
 <h2>Next experiment: what no-room members see (23% of signups)</h2>
 <div class="cols">
 <div>
-<p><b>A · Hidden.</b> No entry point, the same Home the control group saw. Expected ~87.9%.</p>
+<p><b>A · Hidden.</b> No entry point, the same Home the control group saw, so it should match control (~87.9%); the arm checks that.</p>
 <p><b>B · Limit status card.</b> No ask, no soft inquiry. A card on Home states the current limit, that no increase is available, and the specific reasons. Nothing else (no advice), so the test isolates the explanation; no promise of a future increase.</p>
-<p><b>Why this one.</b> Treatment members who never asked, and even declined members who stayed past day 14, almost stopped closing. Something about the experience helps beyond the money. B tests whether no-room members can get that without the decline. If B reaches the room &gt; 0 level, that's +5.9 pts on 23% of members ≈ <b>+1.4 pts overall</b>, the largest lever left.</p>
+<p><b>Why this one.</b> The harm to no-room members is clear; its mechanism isn't. Both arms remove the request and its decline. B adds an explanation of the limit, so A vs B shows whether explaining helps or hurts compared with showing nothing. Never-askers retaining well hints at more than money (descriptive). For scale (optimistic, not a forecast): if B matched the room &gt; 0 level, +5.9 pts on 23% ≈ <b>+1.4 pts overall</b>, the largest remaining gap.</p>
 </div>
 <div>
 <p><b>Primary metric:</b> 30-day retention. <b>Guardrail:</b> 7-day closure rate, checked daily. Stop B if it runs 1 pt above A, since B could feel like a decline without the ask.</p>
-<p><b>Size:</b> a 1-pt effect at an 88% baseline needs ~16,600 members per arm (α 0.05, power 0.8). That's ~23,000 no-room signups a week, so ~1.5 weeks to enrol, then 30 days to read.</p>
-<p><b>Deprioritised:</b> showing members with room their headroom up front (never-askers already retain 93.5%, so there's little to gain); amount defaults (size has no effect); a softer decline screen for no-room members (still a doomed ask).</p>
-<p class="muted small"><b>Open questions:</b> never-askers are a self-selected 5%. Why closures nearly stop after day 14 isn't explained by these two tables. B needs the API to expose the reason codes it would return (added to the mock as <code>increase_eligibility</code>).</p>
+<p><b>Size:</b> a 1-pt effect at an 88% baseline needs ~16,600 members per arm (α 0.05, power 0.8). No-room signups averaged ~23,000 a week (recent weeks were higher), so ≤1.5 weeks to enrol, then 30 days to read.</p>
+<p><b>Deprioritised:</b> showing members with room their headroom up front (never-askers already retained like askers; descriptive); amount defaults (amount wasn't associated with retention); a softer decline screen for no-room members (still a doomed ask).</p>
+<p class="muted small"><b>Open questions:</b> what caused the no-room harm (decline, disappointment, something else) isn't isolated by this data or by A vs B. Why treatment closures nearly stop after day 14 isn't explained. B needs reason codes from the API (mock: <code>increase_eligibility</code>).</p>
 </div>
 </div>
 
-<h2>What changes in the app (both arms)</h2>
-<p><b>No doomed asks:</b> the entry point shows only when at least $100 fits under the ceiling, and the slider stops at the member's room.
-<b>Declines name the reasons:</b> the baseline said only "Declined"; now each <code>reason_code</code> is in plain words, on the result and on Home afterwards.
-<b>Soft inquiry explained</b> before submitting and after a decline. <b>One request, said up front</b>, and Home then shows the decision instead of a button that disappears.
-<b>Approval is live at once</b>, and Home reloads the account. <b>Failures are safe:</b> after a lost response the app reads the account before any resubmit, and stays "can't confirm" if it can't.</p>
+<h2>What changes in the request flow</h2>
+<p><b>No doomed asks:</b> the entry point shows only when $100 fits under the ceiling; the slider stops at the member's room. <b>Declines name each reason</b> in plain words (the baseline said only "Declined"), on the result and on Home. <b>Soft inquiry and the one-request rule</b> are explained up front. <b>Approval is live at once.</b> <b>Lost responses are safe:</b> the app reads the account before any resubmit and stays "can't confirm" if it can't.</p>
 </body>
 </html>
